@@ -92,7 +92,7 @@ jobs:
           code=$(tail -n1 <<<"$body")
           if [[ "$code" == "200" ]]; then exit 0; fi
           if [[ "$code" != "404" ]]; then
-            msg=$(head -n -1 <<<"$body" | jq -r '[.errors[]?.message] | join("; ")' 2>/dev/null || true)
+            msg=$(sed '$d' <<<"$body" | jq -r '[.errors[]?.message] | join("; ")' 2>/dev/null || true)
             echo "::error::Cloudflare API $code checking Worker $NAME: ${msg:-no message}. Check CLOUDFLARE_API_TOKEN (Account → Workers Scripts → Edit) and CLOUDFLARE_ACCOUNT_ID."
             exit 1
           fi
