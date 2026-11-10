@@ -72,6 +72,7 @@ cmd_zoho() { # REPO [ACCOUNTS]: swaps the Self Client code for a refresh token, 
   local repo=${1:-} acc=${2:-https://accounts.zoho.eu} id sec code r rt
   [[ -n "$repo" ]] || die "zoho REPO [ACCOUNTS URL, default https://accounts.zoho.eu]"
   gh repo view "$ORG/$repo" >/dev/null 2>&1 || die "$ORG/$repo not found"
+  { : </dev/tty; } 2>/dev/null || die "it asks questions: run it in a Terminal window, not through Claude's ! prompt"
   echo "In the Zoho API console (api-console.zoho.eu) open your Self Client."
   id=$(clip_wait "Copy the Client ID");         check_value ZOHO_CLIENT_ID "$id" || die "that isn't a Client ID (1000.…)"
   sec=$(clip_wait "Copy the Client Secret");    [[ ${#sec} -gt 20 ]] || die "that isn't a Client Secret"
