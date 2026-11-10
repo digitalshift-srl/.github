@@ -14,6 +14,25 @@ Design and sources: `research/cicd-pipeline.md` in the DigitalShift playbook rep
 
 A missing secret skips its step with a notice, so a repo works before Cloudflare, Claude or Slack are connected.
 
+## New client in one command
+
+`scripts/new-client.sh` (macOS) keeps the four shared secrets in the login Keychain and copies them into each repo, because on GitHub Free org secrets don't reach private repos.
+
+```sh
+# once per Mac, and again after rotating a token: copy the value, then
+scripts/new-client.sh store CLOUDFLARE_API_TOKEN      # checked live with Cloudflare
+scripts/new-client.sh store CLOUDFLARE_ACCOUNT_ID
+scripts/new-client.sh store CLAUDE_CODE_OAUTH_TOKEN
+scripts/new-client.sh store SLACK_WEBHOOK_URL
+scripts/new-client.sh status
+
+# each new client: private repo from Site Kit, squash-only, labels, secrets, cloned to ~/Developer/<name>
+scripts/new-client.sh create casabella
+
+# after rotating a token: push the new value to every client repo
+scripts/new-client.sh sync --all
+```
+
 ## Decisions (2026-11-10)
 
 - **GitHub Free** for now. Nothing on Free blocks a merge into `main` of a private repo, so `deploy.yml` checks approval before deploying (research §11.1). Upgrade to Team when the hard merge rule is needed; the stubs don't change.
@@ -43,7 +62,7 @@ Every step below creates or changes something outside this laptop. Claude does e
 - create the label `admin-bypass`;
 - in `.github/workflows/deploy.yml`, set `target` (`cloudflare` for the DigitalShift site, if that's where it will live).
 
-**6. Cloudflare.** Sites run on **Workers static assets**, not classic Pages. Since mid-2026 Cloudflare points new projects at Workers, and wrangler redirects `pages` commands there. Make one account (company email), then open *Workers & Pages* once in the dashboard: that creates the `<sub>.workers.dev` subdomain previews need. Create an API token scoped to *Account → Workers Scripts → Edit*, for that account only. Add the secrets `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` per repo (Free may not share org secrets with private repos). No project to create by hand: the first PR preview creates the Worker (named like the repo) with a placeholder page. Each repo carries `wrangler.jsonc`; the workflows write a default one if it's missing. wrangler is pinned with the `wrangler-version` input. Custom domain at launch: add `"routes": [{ "pattern": "www.client.it", "custom_domain": true }]` to `wrangler.jsonc`. The zone must be in the same Cloudflare account. Rollback: `npx wrangler rollback --name <worker>` or Dashboard → Deployments.
+**6. Cloudflare.** Sites run on **Workers static assets**, not classic Pages. Since mid-2026 Cloudflare points new projects at Workers, and wrangler redirects `pages` commands there. Make one account (company email), then open *Workers & Pages* once in the dashboard: that creates the `<sub>.workers.dev` subdomain previews need. Create an API token scoped to *Account → Workers Scripts → Edit*, for that account only. Add the secrets `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` per repo: on GitHub Free, org secrets don't reach private repos (confirmed in GitHub's docs). `scripts/new-client.sh` does this from the Keychain. No project to create by hand: the first PR preview creates the Worker (named like the repo) with a placeholder page. Each repo carries `wrangler.jsonc`; the workflows write a default one if it's missing. wrangler is pinned with the `wrangler-version` input. Custom domain at launch: add `"routes": [{ "pattern": "www.client.it", "custom_domain": true }]` to `wrangler.jsonc`. The zone must be in the same Cloudflare account. Rollback: `npx wrangler rollback --name <worker>` or Dashboard → Deployments.
 
 **7. Claude review.** Install the Claude GitHub App on the org (`/install-github-app` in Claude Code, or github.com/apps/claude). Run `claude setup-token` and save the token as the secret `CLAUDE_CODE_OAUTH_TOKEN`. An `ANTHROPIC_API_KEY` works instead.
 
