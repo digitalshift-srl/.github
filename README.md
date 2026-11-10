@@ -63,5 +63,5 @@ Every step below creates or changes something outside this laptop. Claude does e
 
 - The gate guards against mistakes and agents. It's not a security boundary: anyone with write access can edit a stub on `main`.
 - On Free, CODEOWNERS only *requests* Andrea's review; it doesn't enforce it.
-- gitleaks is pinned to `8.24.0` (input `gitleaks-version`), and the actions to their major tags. Check versions when tagging a release here.
+- gitleaks is pinned to `8.30.1` (input `gitleaks-version`), and the actions to their major tags. Check versions when tagging a release here.
 - Not built yet: the weekly production health check (research §12), the Slack approve bot (v2), axe/Playwright accessibility tests and visual regression.
