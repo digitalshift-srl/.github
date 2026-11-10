@@ -7,10 +7,10 @@ Design and sources: `research/cicd-pipeline.md` in the DigitalShift playbook rep
 | Workflow | Called from | Does |
 |---|---|---|
 | `ci.yml` | `pr.yml` | Conventional-Commit PR title, gitleaks secret scan, build, Site Kit QA (`scripts/qa.mjs`), external link report (lychee), Lighthouse CI |
-| `preview.yml` | `pr.yml` | Uploads `dist/` to Cloudflare Pages as a branch preview and comments the URL on the PR |
+| `preview.yml` | `pr.yml` | Uploads `dist/` to Cloudflare Workers as a preview version (`pr-<n>-<site>.<sub>.workers.dev`, live site untouched) and comments the URL on the PR. Creates the Worker with a noindex placeholder if it doesn't exist yet |
 | `claude-review.yml` | `pr.yml` | Claude reviews against Site Kit rules and posts comments. Advisory unless `blocking: true` |
 | `notify-slack.yml` | `pr.yml` | Ready-for-review message: PR, preview, checks, review verdict |
-| `deploy.yml` | `deploy.yml` | Approval gate, then production deploy to Cloudflare Pages or SiteGround (rsync, port 18765). Slack on failure |
+| `deploy.yml` | `deploy.yml` | Approval gate, then production deploy to Cloudflare Workers (static assets) or SiteGround (rsync, port 18765). Slack on failure |
 
 A missing secret skips its step with a notice, so a repo works before Cloudflare, Claude or Slack are connected.
 
@@ -43,7 +43,7 @@ Every step below creates or changes something outside this laptop. Claude does e
 - create the label `admin-bypass`;
 - in `.github/workflows/deploy.yml`, set `target` (`cloudflare` for the DigitalShift site, if that's where it will live).
 
-**6. Cloudflare.** Make an account and an API token scoped to *Account → Cloudflare Pages → Edit* only. Create a Pages project named like the repo, with production branch `main` (dashboard → Workers & Pages → Create → Direct upload, or `npx wrangler pages project create <name> --production-branch main`). Add the secrets `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`, as org secrets or, if the Free plan doesn't share org secrets with private repos, per repo.
+**6. Cloudflare.** Sites run on **Workers static assets**, not classic Pages. Since mid-2026 Cloudflare points new projects at Workers, and wrangler redirects `pages` commands there. Make one account (company email), then open *Workers & Pages* once in the dashboard: that creates the `<sub>.workers.dev` subdomain previews need. Create an API token scoped to *Account → Workers Scripts → Edit*, for that account only. Add the secrets `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` per repo (Free may not share org secrets with private repos). No project to create by hand: the first PR preview creates the Worker (named like the repo) with a placeholder page. Each repo carries `wrangler.jsonc`; the workflows write a default one if it's missing. wrangler is pinned with the `wrangler-version` input. Custom domain at launch: add `"routes": [{ "pattern": "www.client.it", "custom_domain": true }]` to `wrangler.jsonc`. The zone must be in the same Cloudflare account. Rollback: `npx wrangler rollback --name <worker>` or Dashboard → Deployments.
 
 **7. Claude review.** Install the Claude GitHub App on the org (`/install-github-app` in Claude Code, or github.com/apps/claude). Run `claude setup-token` and save the token as the secret `CLAUDE_CODE_OAUTH_TOKEN`. An `ANTHROPIC_API_KEY` works instead.
 
@@ -64,4 +64,5 @@ Every step below creates or changes something outside this laptop. Claude does e
 - The gate guards against mistakes and agents. It's not a security boundary: anyone with write access can edit a stub on `main`.
 - On Free, CODEOWNERS only *requests* Andrea's review; it doesn't enforce it.
 - gitleaks is pinned to `8.30.1` (input `gitleaks-version`), and the actions to their major tags. Check versions when tagging a release here.
+- Previews on `workers.dev` are public to anyone who has the link (like Pages previews were). Put Cloudflare Access in front of them if a client needs them private.
 - Not built yet: the weekly production health check (research §12), the Slack approve bot (v2), axe/Playwright accessibility tests and visual regression.
