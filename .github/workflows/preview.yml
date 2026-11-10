@@ -3,6 +3,7 @@
 #   https://pr-<number>-<worker>.<account subdomain>.workers.dev
 # A preview never changes the live site. If the Worker doesn't exist yet (new client, not launched),
 # it is first created with a noindex "coming soon" placeholder, so previews work before launch.
+# Previews should sit behind Cloudflare Access (README step 6b); a public one gets a warning.
 name: preview
 on:
   workflow_call:
@@ -143,16 +144,35 @@ jobs:
           [[ -n "$sub" ]] || { echo "::error::No workers.dev subdomain on this account. Open Workers & Pages in the dashboard once."; exit 1; }
           echo "url=https://$ALIAS-$NAME.$sub.workers.dev" >> "$GITHUB_OUTPUT"
 
+      - id: access
+        name: Check the preview is behind Cloudflare Access
+        if: steps.upload.outputs.url != ''
+        env:
+          URL: ${{ steps.upload.outputs.url }}
+        run: |
+          # Access answers with a redirect to <team>.cloudflareaccess.com (or 401/403), never the page itself.
+          read -r code location < <(curl -s -o /dev/null -w '%{http_code} %{redirect_url}\n' "$URL" || echo "000 -")
+          if [[ "$code" =~ ^(401|403)$ || "$location" == *cloudflareaccess.com* ]]; then
+            echo "public=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "public=true" >> "$GITHUB_OUTPUT"
+            echo "::warning::The preview is public (HTTP $code): anyone with the link can open it. Turn on Cloudflare Access for this Worker's Preview URLs (README step 6b)."
+          fi
+
       - name: Comment the preview URL on the PR
         if: steps.upload.outputs.url != ''
         uses: actions/github-script@v9
         env:
           URL: ${{ steps.upload.outputs.url }}
+          PUBLIC: ${{ steps.access.outputs.public }}
           SHA: ${{ github.event.pull_request.head.sha }}
         with:
           script: |
             const marker = '<!-- digitalshift-preview -->';
-            const body = `${marker}\n🔍 **Preview:** ${process.env.URL}\n\nCommit \`${process.env.SHA.slice(0, 7)}\`. Updates on every push.`;
+            const access = process.env.PUBLIC === 'true'
+              ? '⚠️ **Public:** anyone with the link can open it. Turn on Cloudflare Access for this Worker (Settings → Domains & Routes → Preview URLs).'
+              : '🔒 Sign-in required (Cloudflare Access).';
+            const body = `${marker}\n🔍 **Preview:** ${process.env.URL}\n\n${access}\n\nCommit \`${process.env.SHA.slice(0, 7)}\`. Updates on every push.`;
             const { owner, repo } = context.repo;
             const issue_number = context.payload.pull_request.number;
             const comments = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number });
