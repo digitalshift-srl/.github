@@ -79,7 +79,8 @@ jobs:
         run: echo "built=true" >> "$GITHUB_OUTPUT"
 
       - name: Site QA (titles, descriptions, h1, alt text, internal links, TODOs, budgets)
-        run: node scripts/qa.mjs
+        # In the Site Kit template repo itself, TODO placeholders are by design: warnings, not failures.
+        run: node scripts/qa.mjs ${{ github.event.repository.is_template && '--template' || '' }}
 
       - name: External links (report only)
         if: ${{ !cancelled() && steps.built.outputs.built == 'true' }}
