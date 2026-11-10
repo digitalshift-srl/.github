@@ -76,7 +76,7 @@ cmd_zoho() { # REPO [ACCOUNTS]: swaps the Self Client code for a refresh token, 
   echo "In the Zoho API console (api-console.zoho.eu) open your Self Client."
   id=$(clip_wait "Copy the Client ID");         check_value ZOHO_CLIENT_ID "$id" || die "that isn't a Client ID (1000.…)"
   sec=$(clip_wait "Copy the Client Secret");    [[ ${#sec} -gt 20 ]] || die "that isn't a Client Secret"
-  echo "Generate Code tab: scope ZohoCRM.modules.leads.CREATE,ZohoCRM.modules.leads.UPDATE, 10 minutes, any description."
+  echo "Generate Code tab: scope ZohoCRM.modules.leads.ALL, 10 minutes, any description."
   code=$(clip_wait "Click Create, copy the code"); [[ "$code" == 1000.* ]] || die "that isn't a code (1000.…)"
   r=$(curl -s -X POST "$acc/oauth/v2/token" --data-urlencode "grant_type=authorization_code" \
     --data-urlencode "client_id=$id" --data-urlencode "client_secret=$sec" --data-urlencode "code=$code")
