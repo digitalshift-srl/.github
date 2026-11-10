@@ -1,14 +1,19 @@
-# Reusable: upload the built dist/ (artifact from ci.yml) to Cloudflare Pages as a branch preview,
-# then post or update one comment on the PR with the URL.
-# Direct upload from Actions doesn't use the Pages build quota.
+# Reusable: upload the built dist/ (artifact from ci.yml) to Cloudflare Workers (static assets) as a
+# preview version with a stable alias per PR, then post or update one comment on the PR with the URL:
+#   https://pr-<number>-<worker>.<account subdomain>.workers.dev
+# A preview never changes the live site. If the Worker doesn't exist yet (new client, not launched),
+# it is first created with a noindex "coming soon" placeholder, so previews work before launch.
 name: preview
 on:
   workflow_call:
     inputs:
-      cloudflare-project:
-        description: Pages project name. Defaults to the repo name.
+      worker-name:
+        description: Worker name. Defaults to the repo name.
         type: string
         default: ''
+      wrangler-version:
+        type: string
+        default: '4.160.0'
     secrets:
       CLOUDFLARE_API_TOKEN:
         required: false
@@ -16,13 +21,13 @@ on:
         required: false
     outputs:
       url:
-        description: Preview URL (branch alias when available), empty if skipped
+        description: Preview URL, empty if skipped
         value: ${{ jobs.deploy.outputs.url }}
 permissions:
   contents: read
 jobs:
   deploy:
-    name: Preview on Cloudflare Pages
+    name: Preview on Cloudflare
     # Fork PRs get no secrets; previews are for our own branches.
     if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
@@ -31,24 +36,31 @@ jobs:
       contents: read
       pull-requests: write
     outputs:
-      url: ${{ steps.url.outputs.url }}
+      url: ${{ steps.upload.outputs.url }}
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      WRANGLER: npx -y wrangler@${{ inputs.wrangler-version }}
+      WRANGLER_SEND_METRICS: 'false'
     steps:
       - id: setup
         env:
-          TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          PROJECT: ${{ inputs.cloudflare-project }}
-          HEAD_REF: ${{ github.head_ref }}
+          NAME: ${{ inputs.worker-name }}
+          PR: ${{ github.event.pull_request.number }}
         run: |
-          if [[ -z "$TOKEN" || -z "$ACCOUNT" ]]; then
+          if [[ -z "$CLOUDFLARE_API_TOKEN" || -z "$CLOUDFLARE_ACCOUNT_ID" ]]; then
             echo "::notice::Cloudflare secrets not set: preview skipped."
             echo "enabled=false" >> "$GITHUB_OUTPUT"; exit 0
           fi
-          echo "enabled=true" >> "$GITHUB_OUTPUT"
-          echo "project=${PROJECT:-${GITHUB_REPOSITORY#*/}}" >> "$GITHUB_OUTPUT"
-          # Branch names go into a command line: keep only safe characters.
-          branch=$(printf '%s' "$HEAD_REF" | tr -c 'A-Za-z0-9-' '-' | cut -c1-28 | sed 's/-*$//')
-          echo "branch=${branch:-preview}" >> "$GITHUB_OUTPUT"
+          # Worker names: lowercase letters, digits, dashes. Leave room for the "pr-NNNN-" alias (63-char DNS label).
+          name=$(printf '%s' "${NAME:-${GITHUB_REPOSITORY#*/}}" | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9-' '-' | sed -E 's/^-+//; s/-+$//' | cut -c1-50)
+          { echo "enabled=true"; echo "name=$name"; echo "alias=pr-$PR"; } >> "$GITHUB_OUTPUT"
+
+      - if: steps.setup.outputs.enabled == 'true'
+        uses: actions/checkout@v7
+        with:
+          sparse-checkout: wrangler.jsonc
+          sparse-checkout-cone-mode: false
 
       - if: steps.setup.outputs.enabled == 'true'
         uses: actions/download-artifact@v8
@@ -56,26 +68,59 @@ jobs:
           name: dist
           path: dist
 
-      - id: wrangler
+      - name: Default wrangler.jsonc if the repo has none
         if: steps.setup.outputs.enabled == 'true'
-        uses: cloudflare/wrangler-action@v4
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: pages deploy dist --project-name=${{ steps.setup.outputs.project }} --branch=${{ steps.setup.outputs.branch }} --commit-hash=${{ github.event.pull_request.head.sha }}
+        run: |
+          [[ -f wrangler.jsonc ]] && exit 0
+          cat > wrangler.jsonc <<'EOF'
+          {
+            "name": "site",
+            "compatibility_date": "2026-11-01",
+            "assets": { "directory": "./dist", "not_found_handling": "404-page", "html_handling": "auto-trailing-slash" },
+            "workers_dev": true,
+            "preview_urls": true
+          }
+          EOF
 
-      - id: url
+      - name: Create the Worker with a placeholder if it doesn't exist yet
         if: steps.setup.outputs.enabled == 'true'
         env:
-          ALIAS: ${{ steps.wrangler.outputs.pages-deployment-alias-url }}
-          DEPLOY: ${{ steps.wrangler.outputs.deployment-url }}
-        run: echo "url=${ALIAS:-$DEPLOY}" >> "$GITHUB_OUTPUT"
+          NAME: ${{ steps.setup.outputs.name }}
+        run: |
+          code=$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$NAME/settings")
+          if [[ "$code" == "200" ]]; then exit 0; fi
+          if [[ "$code" != "404" ]]; then echo "::error::Cloudflare API returned $code checking Worker $NAME (token permissions?)"; exit 1; fi
+          echo "::notice::Worker $NAME doesn't exist yet: creating it with a placeholder page (not indexed)."
+          mkdir -p "$RUNNER_TEMP/placeholder"
+          cat > "$RUNNER_TEMP/placeholder/index.html" <<'EOF'
+          <!doctype html><html lang="it"><head><meta charset="utf-8"><meta name="robots" content="noindex">
+          <meta name="viewport" content="width=device-width,initial-scale=1"><title>In costruzione</title></head>
+          <body style="font-family:system-ui;display:grid;place-items:center;min-height:100vh;margin:0">
+          <p>Sito in costruzione.</p></body></html>
+          EOF
+          $WRANGLER deploy --name "$NAME" --assets "$RUNNER_TEMP/placeholder"
+
+      - id: upload
+        name: Upload preview version
+        if: steps.setup.outputs.enabled == 'true'
+        env:
+          NAME: ${{ steps.setup.outputs.name }}
+          ALIAS: ${{ steps.setup.outputs.alias }}
+          SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          $WRANGLER versions upload --name "$NAME" --preview-alias "$ALIAS" --tag "${SHA:0:7}" --message "PR preview ${SHA:0:7}"
+          sub=$(curl -sf -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/subdomain" | jq -r '.result.subdomain // empty')
+          [[ -n "$sub" ]] || { echo "::error::No workers.dev subdomain on this account. Open Workers & Pages in the dashboard once."; exit 1; }
+          echo "url=https://$ALIAS-$NAME.$sub.workers.dev" >> "$GITHUB_OUTPUT"
 
       - name: Comment the preview URL on the PR
-        if: steps.url.outputs.url != ''
+        if: steps.upload.outputs.url != ''
         uses: actions/github-script@v9
         env:
-          URL: ${{ steps.url.outputs.url }}
+          URL: ${{ steps.upload.outputs.url }}
           SHA: ${{ github.event.pull_request.head.sha }}
         with:
           script: |
