@@ -47,6 +47,12 @@ on:
         required: false
       TURNSTILE_SECRET_KEY:
         required: false
+      ZOHO_CLIENT_ID:
+        required: false
+      ZOHO_CLIENT_SECRET:
+        required: false
+      ZOHO_REFRESH_TOKEN:
+        required: false
       SG_SSH_KEY:
         required: false
       SG_HOST:
@@ -138,6 +144,9 @@ jobs:
           SHA: ${{ github.sha }}
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
           TURNSTILE_SECRET_KEY: ${{ secrets.TURNSTILE_SECRET_KEY }}
+          ZOHO_CLIENT_ID: ${{ secrets.ZOHO_CLIENT_ID }}
+          ZOHO_CLIENT_SECRET: ${{ secrets.ZOHO_CLIENT_SECRET }}
+          ZOHO_REFRESH_TOKEN: ${{ secrets.ZOHO_REFRESH_TOKEN }}
         run: |
           set -euo pipefail
           for v in CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID; do [[ -n "${!v}" ]] || { echo "::error::Secret $v is missing."; exit 1; }; done
@@ -145,12 +154,12 @@ jobs:
           if [[ ! -f wrangler.jsonc ]]; then
             printf '%s\n' '{ "name": "site", "compatibility_date": "2026-11-01", "assets": { "directory": "./dist", "not_found_handling": "404-page", "html_handling": "auto-trailing-slash" }, "workers_dev": true, "preview_urls": true }' > wrangler.jsonc
           fi
-          # Contact form secrets for the Worker (worker/), uploaded with the version. Only when the repo has a Worker.
+          # Contact form secrets (Resend, Turnstile, Zoho) for the Worker (worker/), uploaded with the version. Only when the repo has a Worker.
           secrets_args=()
           if grep -q '"main"' wrangler.jsonc; then
             install -m 600 /dev/null "$RUNNER_TEMP/secrets.json"
-            jq -n --arg r "$RESEND_API_KEY" --arg t "$TURNSTILE_SECRET_KEY" \
-              '{RESEND_API_KEY: $r, TURNSTILE_SECRET_KEY: $t} | with_entries(select(.value != ""))' > "$RUNNER_TEMP/secrets.json"
+            jq -n 'env | {RESEND_API_KEY, TURNSTILE_SECRET_KEY, ZOHO_CLIENT_ID, ZOHO_CLIENT_SECRET, ZOHO_REFRESH_TOKEN}
+              | with_entries(select(.value != null and .value != ""))' > "$RUNNER_TEMP/secrets.json"
             secrets_args=(--secrets-file "$RUNNER_TEMP/secrets.json")
             trap 'rm -f "$RUNNER_TEMP/secrets.json"' EXIT
           fi
@@ -166,6 +175,9 @@ jobs:
           SG_PORT: ${{ secrets.SG_PORT }}
           SG_PATH: ${{ secrets.SG_PATH }}
           TURNSTILE_SECRET_KEY: ${{ secrets.TURNSTILE_SECRET_KEY }}
+          ZOHO_CLIENT_ID: ${{ secrets.ZOHO_CLIENT_ID }}
+          ZOHO_CLIENT_SECRET: ${{ secrets.ZOHO_CLIENT_SECRET }}
+          ZOHO_REFRESH_TOKEN: ${{ secrets.ZOHO_REFRESH_TOKEN }}
         run: |
           set -euo pipefail
           for v in SSH_KEY SG_HOST SG_USER SG_PATH; do [[ -n "${!v}" ]] || { echo "::error::Secret for $v is missing."; exit 1; }; done
@@ -175,9 +187,12 @@ jobs:
           ssh_cmd="ssh -i $RUNNER_TEMP/key -p ${SG_PORT:-18765} -o StrictHostKeyChecking=accept-new"
           # form-secrets.php lives only on the server: excluded so --delete keeps it, uploaded on its own.
           rsync -az --delete --exclude /form-secrets.php -e "$ssh_cmd" dist/ "$SG_USER@$SG_HOST:$SG_PATH/"
-          if [[ -f dist/form.php && -n "$TURNSTILE_SECRET_KEY" ]]; then
+          if [[ -f dist/form.php && -n "$TURNSTILE_SECRET_KEY$ZOHO_REFRESH_TOKEN" ]]; then
             install -m 600 /dev/null "$RUNNER_TEMP/form-secrets.php"
-            T="$TURNSTILE_SECRET_KEY" php -r 'echo "<?php return " . var_export(["turnstile" => getenv("T")], true) . ";\n";' > "$RUNNER_TEMP/form-secrets.php"
+            php -r 'echo "<?php return " . var_export(array_filter([
+              "turnstile" => getenv("TURNSTILE_SECRET_KEY"), "zoho_client_id" => getenv("ZOHO_CLIENT_ID"),
+              "zoho_client_secret" => getenv("ZOHO_CLIENT_SECRET"), "zoho_refresh_token" => getenv("ZOHO_REFRESH_TOKEN"),
+            ]), true) . ";\n";' > "$RUNNER_TEMP/form-secrets.php"
             rsync -az --chmod=F600 -e "$ssh_cmd" "$RUNNER_TEMP/form-secrets.php" "$SG_USER@$SG_HOST:$SG_PATH/form-secrets.php"
           fi
 

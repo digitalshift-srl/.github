@@ -23,6 +23,12 @@ on:
         required: false
       TURNSTILE_SECRET_KEY:
         required: false
+      ZOHO_CLIENT_ID:
+        required: false
+      ZOHO_CLIENT_SECRET:
+        required: false
+      ZOHO_REFRESH_TOKEN:
+        required: false
     outputs:
       url:
         description: Preview URL, empty if skipped
@@ -117,14 +123,17 @@ jobs:
           SHA: ${{ github.event.pull_request.head.sha }}
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
           TURNSTILE_SECRET_KEY: ${{ secrets.TURNSTILE_SECRET_KEY }}
+          ZOHO_CLIENT_ID: ${{ secrets.ZOHO_CLIENT_ID }}
+          ZOHO_CLIENT_SECRET: ${{ secrets.ZOHO_CLIENT_SECRET }}
+          ZOHO_REFRESH_TOKEN: ${{ secrets.ZOHO_REFRESH_TOKEN }}
         run: |
           set -euo pipefail
-          # Contact form secrets for the Worker (worker/), uploaded with the version. Only when the repo has a Worker.
+          # Contact form secrets (Resend, Turnstile, Zoho) for the Worker (worker/), uploaded with the version. Only when the repo has a Worker.
           secrets_args=()
           if grep -q '"main"' wrangler.jsonc; then
             install -m 600 /dev/null "$RUNNER_TEMP/secrets.json"
-            jq -n --arg r "$RESEND_API_KEY" --arg t "$TURNSTILE_SECRET_KEY" \
-              '{RESEND_API_KEY: $r, TURNSTILE_SECRET_KEY: $t} | with_entries(select(.value != ""))' > "$RUNNER_TEMP/secrets.json"
+            jq -n 'env | {RESEND_API_KEY, TURNSTILE_SECRET_KEY, ZOHO_CLIENT_ID, ZOHO_CLIENT_SECRET, ZOHO_REFRESH_TOKEN}
+              | with_entries(select(.value != null and .value != ""))' > "$RUNNER_TEMP/secrets.json"
             secrets_args=(--secrets-file "$RUNNER_TEMP/secrets.json")
             trap 'rm -f "$RUNNER_TEMP/secrets.json"' EXIT
           fi

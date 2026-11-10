@@ -9,7 +9,7 @@
 #   scripts/new-client.sh set REPO NAME       save the clipboard as a secret of one repo only (e.g. TURNSTILE_SECRET_KEY)
 #
 # NAME is one of: CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID CLAUDE_CODE_OAUTH_TOKEN SLACK_WEBHOOK_URL RESEND_API_KEY
-# (shared by all sites). Per-site secrets go through `set`: TURNSTILE_SECRET_KEY, and SG_* for SiteGround.
+# (shared by all sites). Per-site secrets go through `set`: TURNSTILE_SECRET_KEY, ZOHO_* (CRM), SG_* (SiteGround).
 # SiteGround clients also need SG_SSH_KEY, SG_HOST, SG_USER, SG_PATH, plus hosting/target: siteground.
 set -euo pipefail
 
@@ -33,6 +33,8 @@ check_value() { # NAME VALUE → exit 0 if plausible
     SLACK_WEBHOOK_URL) [[ "$v" == https://hooks.slack.com/services/* ]] ;;
     RESEND_API_KEY) [[ "$v" == re_* && ${#v} -gt 20 ]] ;;
     TURNSTILE_SECRET_KEY) [[ "$v" =~ ^0x[0-9A-Za-z_-]{20,}$ ]] ;;
+    ZOHO_CLIENT_ID) [[ "$v" =~ ^1000\.[A-Z0-9]{20,}$ ]] ;;
+    ZOHO_CLIENT_SECRET|ZOHO_REFRESH_TOKEN) [[ ${#v} -gt 20 ]] ;;
     SG_SSH_KEY|SG_HOST|SG_USER|SG_PORT|SG_PATH) [[ -n "$v" ]] ;;
     *) return 1 ;;
   esac
