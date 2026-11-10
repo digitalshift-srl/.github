@@ -87,10 +87,15 @@ jobs:
         env:
           NAME: ${{ steps.setup.outputs.name }}
         run: |
-          code=$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+          body=$(curl -s -w '\n%{http_code}' -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
             "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$NAME/settings")
+          code=$(tail -n1 <<<"$body")
           if [[ "$code" == "200" ]]; then exit 0; fi
-          if [[ "$code" != "404" ]]; then echo "::error::Cloudflare API returned $code checking Worker $NAME (token permissions?)"; exit 1; fi
+          if [[ "$code" != "404" ]]; then
+            msg=$(head -n -1 <<<"$body" | jq -r '[.errors[]?.message] | join("; ")' 2>/dev/null || true)
+            echo "::error::Cloudflare API $code checking Worker $NAME: ${msg:-no message}. Check CLOUDFLARE_API_TOKEN (Account → Workers Scripts → Edit) and CLOUDFLARE_ACCOUNT_ID."
+            exit 1
+          fi
           echo "::notice::Worker $NAME doesn't exist yet: creating it with a placeholder page (not indexed)."
           mkdir -p "$RUNNER_TEMP/placeholder"
           cat > "$RUNNER_TEMP/placeholder/index.html" <<'EOF'
