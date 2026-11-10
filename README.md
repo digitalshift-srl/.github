@@ -73,6 +73,8 @@ Every step below creates or changes something outside this laptop. Claude does e
 
 **7. Claude review.** Install the Claude GitHub App on the org (`/install-github-app` in Claude Code, or github.com/apps/claude). Run `claude setup-token` and save the token as the secret `CLAUDE_CODE_OAUTH_TOKEN`. An `ANTHROPIC_API_KEY` works instead.
 
+**7b. @claude on GitHub.** Write `@claude` and a request in a PR comment, a review or a new issue ("@claude make the hero headline smaller"). Claude pushes the change to that PR (or opens a PR from an issue); the preview, checks, review and Slack message run again, and any approval goes stale. Only people with write access can trigger it, and the repo's guardrails apply (no merge, approve, push to main or deploy). Each repo needs `.github/workflows/claude.yml` on `main` (Site Kit has it); it uses `CLAUDE_CODE_OAUTH_TOKEN`, so each request counts against that Claude plan. Needs the Claude GitHub App on the org (step 7).
+
 **8. Slack.** Create the channel `#site-reviews` and an incoming webhook, and save it as the secret `SLACK_WEBHOOK_URL`. Optional: the GitHub Slack app for review notifications.
 
 **8b. Contact forms.** Site Kit's form works on both hosts (`hosting` in `src/site.config.ts`, matching `target:` in `deploy.yml`).

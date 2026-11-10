@@ -1,0 +1,76 @@
+# Reusable: "@claude ..." in a PR comment, a review, a review comment or a new issue asks Claude to
+# answer, or to change the code. On a PR it pushes commits to the PR's branch, which re-runs the
+# preview, checks, review and Slack message, and makes any approval stale (the gate wants a fresh
+# one). On an issue it opens a branch and a PR. It never touches main: the repo's CLAUDE.md,
+# .claude/settings.json and guard hook apply here as on a laptop.
+# Only people with write access (owner, member, collaborator) can trigger it. Runs on the Claude
+# plan behind CLAUDE_CODE_OAUTH_TOKEN (or ANTHROPIC_API_KEY).
+# Callers: .github/workflows/claude.yml in each repo, on main (GitHub runs comment triggers from main).
+name: claude-mention
+on:
+  workflow_call:
+    inputs:
+      claude-args:
+        description: Extra Claude CLI flags, e.g. --model <id>
+        type: string
+        default: ''
+    secrets:
+      CLAUDE_CODE_OAUTH_TOKEN:
+        required: false
+      ANTHROPIC_API_KEY:
+        required: false
+permissions:
+  contents: read
+jobs:
+  claude:
+    name: Claude (@claude)
+    if: >-
+      contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'),
+        github.event.comment.author_association || github.event.review.author_association || github.event.issue.author_association) &&
+      (contains(github.event.comment.body, '@claude') || contains(github.event.review.body, '@claude') ||
+        (github.event_name == 'issues' && (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude'))))
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    concurrency:
+      group: claude-${{ github.event.issue.number || github.event.pull_request.number }}
+      cancel-in-progress: false
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      id-token: write
+    steps:
+      - id: auth
+        env:
+          OAUTH: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          if [[ -z "$OAUTH" && -z "$KEY" ]]; then
+            echo "::notice::No Claude credentials set: @claude skipped."
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - if: steps.auth.outputs.enabled == 'true'
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+
+      - if: steps.auth.outputs.enabled == 'true'
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+
+      - if: steps.auth.outputs.enabled == 'true'
+        run: npm ci
+
+      - if: steps.auth.outputs.enabled == 'true'
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          claude_args: >-
+            --allowedTools "Bash(npm run build),Bash(npm run qa),Bash(npm test),Bash(npx astro check)"
+            ${{ inputs.claude-args }}
