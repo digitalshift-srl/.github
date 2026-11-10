@@ -7,6 +7,7 @@
 #   scripts/new-client.sh sync REPO|--all     copy the Keychain secrets to one repo, or to every Site Kit repo (after a rotation)
 #   scripts/new-client.sh status              which secrets are in the Keychain
 #   scripts/new-client.sh set REPO NAME       save the clipboard as a secret of one repo only (e.g. TURNSTILE_SECRET_KEY)
+#   scripts/new-client.sh zoho REPO [ACCOUNTS] connect a site to Zoho CRM: Self Client ID, secret and code → tested keys
 #
 # NAME is one of: CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID CLAUDE_CODE_OAUTH_TOKEN SLACK_WEBHOOK_URL RESEND_API_KEY
 # (shared by all sites). Per-site secrets go through `set`: TURNSTILE_SECRET_KEY, ZOHO_* (CRM), SG_* (SiteGround).
@@ -60,6 +61,36 @@ cmd_set() { # REPO NAME: one repo's own secret, straight from the clipboard (not
   check_value "$name" "$v" || die "the clipboard doesn't look like a valid $name (nothing saved)"
   printf '%s' "$v" | gh secret set "$name" -R "$ORG/$repo"
   info "$repo: $name set"
+}
+
+clip_wait() { # PROMPT → the clipboard after Enter, without spaces
+  read -r -p "$1, then press Enter " _ </dev/tty
+  pbpaste | tr -d '[:space:]'
+}
+
+cmd_zoho() { # REPO [ACCOUNTS]: swaps the Self Client code for a refresh token, tests it, saves the three secrets
+  local repo=${1:-} acc=${2:-https://accounts.zoho.eu} id sec code r rt
+  [[ -n "$repo" ]] || die "zoho REPO [ACCOUNTS URL, default https://accounts.zoho.eu]"
+  gh repo view "$ORG/$repo" >/dev/null 2>&1 || die "$ORG/$repo not found"
+  { : </dev/tty; } 2>/dev/null || die "it asks questions: run it in a Terminal window, not through Claude's ! prompt"
+  echo "In the Zoho API console (api-console.zoho.eu) open your Self Client."
+  id=$(clip_wait "Copy the Client ID");         check_value ZOHO_CLIENT_ID "$id" || die "that isn't a Client ID (1000.…)"
+  sec=$(clip_wait "Copy the Client Secret");    [[ ${#sec} -gt 20 ]] || die "that isn't a Client Secret"
+  echo "Generate Code tab: scope ZohoCRM.modules.leads.ALL, 10 minutes, any description."
+  code=$(clip_wait "Click Create, copy the code"); [[ "$code" == 1000.* ]] || die "that isn't a code (1000.…)"
+  r=$(curl -s -X POST "$acc/oauth/v2/token" --data-urlencode "grant_type=authorization_code" \
+    --data-urlencode "client_id=$id" --data-urlencode "client_secret=$sec" --data-urlencode "code=$code")
+  rt=$(jq -r '.refresh_token // empty' <<<"$r")
+  [[ -n "$rt" ]] || die "Zoho refused the code: $(jq -r '.error // .' <<<"$r") (codes expire in minutes and work once: generate a new one)"
+  r=$(curl -s -X POST "$acc/oauth/v2/token" --data-urlencode "grant_type=refresh_token" \
+    --data-urlencode "client_id=$id" --data-urlencode "client_secret=$sec" --data-urlencode "refresh_token=$rt")
+  [[ -n "$(jq -r '.access_token // empty' <<<"$r")" ]] || die "the refresh token doesn't work: $(jq -r '.error // .' <<<"$r")"
+  info "Zoho accepted the keys ($(jq -r '.api_domain' <<<"$r"))"
+  printf '%s' "$id" | gh secret set ZOHO_CLIENT_ID -R "$ORG/$repo"
+  printf '%s' "$sec" | gh secret set ZOHO_CLIENT_SECRET -R "$ORG/$repo"
+  printf '%s' "$rt" | gh secret set ZOHO_REFRESH_TOKEN -R "$ORG/$repo"
+  printf '' | pbcopy
+  info "$repo: ZOHO_CLIENT_ID, ZOHO_CLIENT_SECRET, ZOHO_REFRESH_TOKEN set (clipboard cleared)"
 }
 
 cmd_status() {
@@ -134,6 +165,7 @@ case "${1:-}" in
   create) shift; cmd_create "$@" ;;
   sync) shift; cmd_sync "$@" ;;
   set) shift; cmd_set "$@" ;;
+  zoho) shift; cmd_zoho "$@" ;;
   status) cmd_status ;;
-  *) sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
+  *) sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
 esac

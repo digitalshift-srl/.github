@@ -81,8 +81,8 @@ Every step below creates or changes something outside this laptop. Claude does e
 - Both: one Cloudflare Turnstile widget per site (free, 20 widgets per account, 10 hostnames each). Add the client's domain and `info-digitalshift.workers.dev` (previews), put the site key in `form.turnstileSiteKey`, and the secret with `new-client.sh set <repo> TURNSTILE_SECRET_KEY`. CI uploads it to the Worker, or writes `form-secrets.php` next to `form.php` on SiteGround (never in git or in the release artifact).
 
 **8c. CRM (optional, per site).** Each form message can also be saved in the client's CRM; the e-mail still goes out as the backup and is flagged ⚠ when the CRM save failed. Built in: Zoho CRM, direct, with no middle service. Other CRMs get their own connector when a client needs one.
-- Zoho: in the client's Zoho account open the API console for its data center (api-console.zoho.eu for crm.zoho.eu) → Add Client → Self Client. Under Generate Code, enter the scope `ZohoCRM.modules.leads.CREATE,ZohoCRM.modules.leads.UPDATE`, 10 minutes, and exchange the code for a refresh token (`POST https://accounts.zoho.eu/oauth/v2/token?grant_type=authorization_code&client_id=…&client_secret=…&code=…`).
-- Save the three values with `new-client.sh set <repo> ZOHO_CLIENT_ID`, `ZOHO_CLIENT_SECRET` and `ZOHO_REFRESH_TOKEN`, then set `form.crm.type: 'zoho'` and the field map in `src/site.config.ts`.
+- Zoho: in the client's Zoho account open the API console for its data center (api-console.zoho.eu for crm.zoho.eu) → Add Client → Self Client. Then run `scripts/new-client.sh zoho <repo>` and follow it: it asks you to copy the Client ID, the Client Secret and a fresh code, swaps the code for a refresh token, checks that Zoho accepts it, and saves the three secrets. For another data center pass its accounts URL, e.g. `zoho <repo> https://accounts.zoho.com`.
+- Then set `form.crm.type: 'zoho'` and the field map in `src/site.config.ts`.
 
 **9. Managed settings.** In the claude.ai admin console, set `permissions.disableBypassPermissionsMode: "disable"`.
 
