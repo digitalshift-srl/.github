@@ -19,6 +19,10 @@ on:
         required: false
       CLOUDFLARE_ACCOUNT_ID:
         required: false
+      RESEND_API_KEY:
+        required: false
+      TURNSTILE_SECRET_KEY:
+        required: false
     outputs:
       url:
         description: Preview URL, empty if skipped
@@ -58,9 +62,6 @@ jobs:
 
       - if: steps.setup.outputs.enabled == 'true'
         uses: actions/checkout@v7
-        with:
-          sparse-checkout: wrangler.jsonc
-          sparse-checkout-cone-mode: false
 
       - if: steps.setup.outputs.enabled == 'true'
         uses: actions/download-artifact@v8
@@ -104,7 +105,8 @@ jobs:
           <body style="font-family:system-ui;display:grid;place-items:center;min-height:100vh;margin:0">
           <p>Sito in costruzione.</p></body></html>
           EOF
-          $WRANGLER deploy --name "$NAME" --assets "$RUNNER_TEMP/placeholder"
+          # From an empty folder, so the repo's wrangler.jsonc (and its Worker code) isn't used for the placeholder.
+          (cd "$RUNNER_TEMP" && $WRANGLER deploy --name "$NAME" --assets placeholder --compatibility-date 2026-11-01)
 
       - id: upload
         name: Upload preview version
@@ -113,9 +115,20 @@ jobs:
           NAME: ${{ steps.setup.outputs.name }}
           ALIAS: ${{ steps.setup.outputs.alias }}
           SHA: ${{ github.event.pull_request.head.sha }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          TURNSTILE_SECRET_KEY: ${{ secrets.TURNSTILE_SECRET_KEY }}
         run: |
           set -euo pipefail
-          $WRANGLER versions upload --name "$NAME" --preview-alias "$ALIAS" --tag "${SHA:0:7}" --message "PR preview ${SHA:0:7}"
+          # Contact form secrets for the Worker (worker/), uploaded with the version. Only when the repo has a Worker.
+          secrets_args=()
+          if grep -q '"main"' wrangler.jsonc; then
+            install -m 600 /dev/null "$RUNNER_TEMP/secrets.json"
+            jq -n --arg r "$RESEND_API_KEY" --arg t "$TURNSTILE_SECRET_KEY" \
+              '{RESEND_API_KEY: $r, TURNSTILE_SECRET_KEY: $t} | with_entries(select(.value != ""))' > "$RUNNER_TEMP/secrets.json"
+            secrets_args=(--secrets-file "$RUNNER_TEMP/secrets.json")
+            trap 'rm -f "$RUNNER_TEMP/secrets.json"' EXIT
+          fi
+          $WRANGLER versions upload --name "$NAME" --preview-alias "$ALIAS" --tag "${SHA:0:7}" --message "PR preview ${SHA:0:7}" "${secrets_args[@]}"
           sub=$(curl -sf -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
             "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/subdomain" | jq -r '.result.subdomain // empty')
           [[ -n "$sub" ]] || { echo "::error::No workers.dev subdomain on this account. Open Workers & Pages in the dashboard once."; exit 1; }
