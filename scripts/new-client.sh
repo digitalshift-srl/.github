@@ -18,6 +18,7 @@ ORG=digitalshift-srl
 TEMPLATE=$ORG/site-kit
 SERVICE=digitalshift-ci
 SECRETS=(CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID CLAUDE_CODE_OAUTH_TOKEN SLACK_WEBHOOK_URL RESEND_API_KEY)
+OPTIONAL=(RESEND_API_KEY) # contact form e-mail; a site can start without it and get it later with `sync`
 GIT_NAME=${GIT_NAME:-Andrea}
 
 die() { echo "error: $*" >&2; exit 1; }
@@ -127,7 +128,10 @@ cmd_create() {
   [[ "$repo" =~ ^[a-z0-9][a-z0-9-]{1,49}$ ]] || die "REPO: lowercase letters, digits and dashes, max 50 (it becomes the Worker name)"
   gh repo view "$ORG/$repo" >/dev/null 2>&1 && die "$ORG/$repo already exists"
   [[ -e "$dir" ]] && die "$dir already exists"
-  local missing=0 n; for n in "${SECRETS[@]}"; do kc_get "$n" >/dev/null || missing=1; done
+  local missing=0 n; for n in "${SECRETS[@]}"; do
+    [[ " ${OPTIONAL[*]} " == *" $n "* ]] && continue
+    kc_get "$n" >/dev/null || missing=1
+  done
   [[ $missing == 0 ]] || { cmd_status; die "store the missing secrets first"; }
 
   gh repo create "$ORG/$repo" --private --template "$TEMPLATE" --description "Client site ($repo)" >/dev/null

@@ -5,8 +5,8 @@
 #   - and one of these is true:
 #     a) an approver's latest review on that PR is APPROVED, on the PR's final head commit;
 #     b) ADMIN BYPASS: the PR author is an approver AND a person added the `admin-bypass` label.
-#        (Without the label, every PR an agent opens from Andrea's laptop would count as his.)
-#        TODO before go-live: replace this with a partner's approval or a Team-plan ruleset.
+#        (Without the label, every PR an agent opens from Andrea's laptop would count as Andrea's.)
+#        This is the normal path for Andrea's own PRs (decided 2026-11-10).
 #     c) the PR author is a trusted bot (Renovate automerge after green CI).
 # CMS rebuilds (repository_dispatch) and manual runs re-check the commit at the tip of main the same way.
 # Not a security boundary: anyone with write access can change the stub. On GitHub Team, add the ruleset.
