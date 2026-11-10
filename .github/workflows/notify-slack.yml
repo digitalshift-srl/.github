@@ -1,0 +1,48 @@
+# Reusable: posts the "ready for review" message to Slack via an incoming webhook.
+# v1 approval: the message links to the PR; Andrea approves in the GitHub mobile app.
+name: notify-slack
+on:
+  workflow_call:
+    inputs:
+      ci-result:
+        type: string
+        default: ''
+      preview-url:
+        type: string
+        default: ''
+      review-verdict:
+        type: string
+        default: ''
+    secrets:
+      SLACK_WEBHOOK_URL:
+        required: false
+permissions:
+  contents: read
+jobs:
+  notify:
+    name: Slack message
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - env:
+          WEBHOOK: ${{ secrets.SLACK_WEBHOOK_URL }}
+          REPO: ${{ github.event.repository.name }}
+          TITLE: ${{ github.event.pull_request.title }}
+          AUTHOR: ${{ github.event.pull_request.user.login }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          CI: ${{ inputs.ci-result }}
+          PREVIEW: ${{ inputs.preview-url }}
+          VERDICT: ${{ inputs.review-verdict }}
+        run: |
+          if [[ -z "$WEBHOOK" ]]; then echo "::notice::SLACK_WEBHOOK_URL not set: message skipped."; exit 0; fi
+          esc() { sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g' <<<"$1"; }
+          case "$CI" in success) ci="✅" ;; failure) ci="❌" ;; *) ci="⚪ ${CI:-n/a}" ;; esac
+          case "$VERDICT" in PASS) rv="✅ pass" ;; BLOCK) rv="⚠️ issues found" ;; SKIPPED|'') rv="– skipped" ;; *) rv="❔ no verdict" ;; esac
+          dot="🟢"; [[ "$CI" == "success" && "$VERDICT" != "BLOCK" ]] || dot="🟠"
+          preview="–"; [[ -n "$PREVIEW" ]] && preview="<$PREVIEW|open preview>"
+          text="$dot *[$(esc "$REPO")]* <$PR_URL|$(esc "$TITLE")> by $(esc "$AUTHOR")
+          Preview: $preview · Checks: $ci (<$RUN_URL|details>) · Claude review: $rv
+          <$PR_URL/files|Review PR →>"
+          jq -n --arg text "$text" '{text: $text}' \
+            | curl -sS --fail -X POST -H 'Content-Type: application/json' --data @- "$WEBHOOK"

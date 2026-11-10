@@ -1,0 +1,92 @@
+# Reusable: build + checks for a Site Kit repo. Called from each client repo's pr.yml.
+# Outputs `built` = 'true' once dist/ exists, so the preview can deploy even when QA fails
+# (pre-launch sites often still have TODOs; Andrea still wants to see the page).
+name: ci
+on:
+  workflow_call:
+    inputs:
+      node-version:
+        type: string
+        default: '24'
+      lighthouse:
+        type: boolean
+        default: true
+      gitleaks-version:
+        type: string
+        default: '8.24.0'
+    outputs:
+      built:
+        description: "'true' when dist/ was built and uploaded as the 'dist' artifact"
+        value: ${{ jobs.build.outputs.built }}
+permissions:
+  contents: read
+jobs:
+  build:
+    name: Build and checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      built: ${{ steps.built.outputs.built }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: PR title follows Conventional Commits
+        if: github.event_name == 'pull_request'
+        env:
+          TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          re='^(feat|fix|content|docs|style|refactor|perf|test|build|ci|chore|revert)(\([a-z0-9._/-]+\))?!?: .+'
+          if [[ ! "$TITLE" =~ $re ]]; then
+            echo "::error::PR title must follow Conventional Commits, e.g. 'feat(home): add booking section'. Got: $TITLE"
+            exit 1
+          fi
+
+      - name: Secret scan (gitleaks)
+        env:
+          VERSION: ${{ inputs.gitleaks-version }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          curl -sSfL "https://github.com/gitleaks/gitleaks/releases/download/v${VERSION}/gitleaks_${VERSION}_linux_x64.tar.gz" | tar -xz gitleaks
+          if [[ -n "$BASE" && -n "$HEAD" ]]; then
+            ./gitleaks git --redact --verbose --log-opts="${BASE}..${HEAD}" .
+          else
+            ./gitleaks git --redact --verbose .
+          fi
+          rm -f gitleaks
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node-version }}
+          cache: npm
+      - run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist
+          retention-days: 7
+
+      - id: built
+        run: echo "built=true" >> "$GITHUB_OUTPUT"
+
+      - name: Site QA (titles, descriptions, h1, alt text, internal links, TODOs, budgets)
+        run: node scripts/qa.mjs
+
+      - name: External links (report only)
+        uses: lycheeverse/lychee-action@v2
+        with:
+          args: --no-progress --scheme https --scheme http --max-retries 2 'dist/**/*.html'
+          fail: false
+
+      - name: Lighthouse
+        if: inputs.lighthouse && hashFiles('lighthouserc.json') != ''
+        uses: treosh/lighthouse-ci-action@v12
+        with:
+          configPath: ./lighthouserc.json
+          uploadArtifacts: true

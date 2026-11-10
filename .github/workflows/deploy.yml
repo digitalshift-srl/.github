@@ -1,0 +1,180 @@
+# Reusable: production deploy with an approval gate (research/cicd-pipeline.md §11.1).
+#
+# GitHub Free can't block merges on private repos, so this gate checks the deployed commit instead:
+#   - it must be on main and be the merge commit of a merged PR into main;
+#   - and one of these is true:
+#     a) an approver's latest review on that PR is APPROVED, on the PR's final head commit;
+#     b) ADMIN BYPASS: the PR author is an approver AND a person added the `admin-bypass` label.
+#        (Without the label, every PR an agent opens from Andrea's laptop would count as his.)
+#        TODO before go-live: replace this with a partner's approval or a Team-plan ruleset.
+#     c) the PR author is a trusted bot (Renovate automerge after green CI).
+# CMS rebuilds (repository_dispatch) and manual runs re-check the commit at the tip of main the same way.
+# Not a security boundary: anyone with write access can change the stub. On GitHub Team, add the ruleset.
+name: deploy
+on:
+  workflow_call:
+    inputs:
+      target:
+        description: cloudflare or siteground
+        type: string
+        required: true
+      cloudflare-project:
+        description: Pages project name. Defaults to the repo name.
+        type: string
+        default: ''
+      node-version:
+        type: string
+        default: '24'
+      approvers:
+        description: Comma-separated GitHub logins whose approval allows a deploy
+        type: string
+        default: 'andreagriffini'
+      bypass-label:
+        type: string
+        default: 'admin-bypass'
+      trusted-bots:
+        type: string
+        default: 'renovate[bot]'
+    secrets:
+      CLOUDFLARE_API_TOKEN:
+        required: false
+      CLOUDFLARE_ACCOUNT_ID:
+        required: false
+      SG_SSH_KEY:
+        required: false
+      SG_HOST:
+        required: false
+      SG_USER:
+        required: false
+      SG_PORT:
+        required: false
+      SG_PATH:
+        required: false
+      SLACK_WEBHOOK_URL:
+        required: false
+permissions:
+  contents: read
+  pull-requests: read
+jobs:
+  gate:
+    name: Approval gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      pr: ${{ steps.check.outputs.pr }}
+      reason: ${{ steps.check.outputs.reason }}
+    steps:
+      - id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ github.sha }}
+          APPROVERS: ${{ inputs.approvers }}
+          BYPASS_LABEL: ${{ inputs.bypass-label }}
+          BOTS: ${{ inputs.trusted-bots }}
+        run: |
+          set -euo pipefail
+          fail() { echo "::error::$1"; echo "reason=$1" >> "$GITHUB_OUTPUT"; exit 1; }
+          pass() { echo "::notice::Deploy allowed: $1"; echo "reason=$1" >> "$GITHUB_OUTPUT"; exit 0; }
+          inlist() { local x; IFS=',' read -ra x <<<"$2"; for a in "${x[@]}"; do [[ "$(echo "$a" | xargs)" == "$1" ]] && return 0; done; return 1; }
+
+          [[ "$GITHUB_REF" == "refs/heads/main" ]] || fail "Production deploys only from main (got $GITHUB_REF)."
+          [[ -n "$APPROVERS" && "$APPROVERS" != *ANDREA_GITHUB_LOGIN* ]] || fail "Approvers not configured in digitalshift-srl/.github deploy.yml."
+
+          pr_json=$(gh api "repos/$GITHUB_REPOSITORY/commits/$SHA/pulls" \
+            --jq "[.[] | select(.merged_at != null and .base.ref == \"main\" and .merge_commit_sha == \"$SHA\")][0] // empty")
+          [[ -n "$pr_json" ]] || fail "Commit ${SHA:0:7} on main didn't come from a merged PR (direct push?). Not deploying."
+
+          pr=$(jq -r .number <<<"$pr_json"); author=$(jq -r .user.login <<<"$pr_json"); head=$(jq -r .head.sha <<<"$pr_json")
+          echo "pr=$pr" >> "$GITHUB_OUTPUT"
+
+          if inlist "$author" "$BOTS"; then pass "PR #$pr by trusted bot $author."; fi
+
+          approved=$(gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$pr/reviews" --jq '.[]' | jq -rs \
+            --arg head "$head" --arg approvers "$APPROVERS" '
+              ($approvers | split(",") | map(gsub("^\\s+|\\s+$"; ""))) as $ok
+              | map(select(.user.login as $u | $ok | index($u)))
+              | map(select(.state == "APPROVED" or .state == "CHANGES_REQUESTED" or .state == "DISMISSED"))
+              | group_by(.user.login) | map(max_by(.submitted_at))
+              | map(select(.state == "APPROVED" and .commit_id == $head) | .user.login) | join(",")')
+          if [[ -n "$approved" ]]; then pass "PR #$pr approved by $approved on its final commit."; fi
+
+          if inlist "$author" "$APPROVERS" && jq -e --arg l "$BYPASS_LABEL" '.labels | map(.name) | index($l)' <<<"$pr_json" >/dev/null; then
+            echo "::warning::ADMIN BYPASS: PR #$pr by $author deployed without a second approval."
+            pass "PR #$pr by $author with the $BYPASS_LABEL label (admin bypass)."
+          fi
+
+          fail "PR #$pr has no approval from ($APPROVERS) on its final commit ${head:0:7}. Approve it on GitHub, then re-run this workflow."
+
+  deploy:
+    name: Deploy to ${{ inputs.target }}
+    needs: gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node-version }}
+          cache: npm
+      - run: npm ci
+      - name: Build and QA
+        run: npm run qa
+
+      - id: cf
+        if: inputs.target == 'cloudflare'
+        env:
+          PROJECT: ${{ inputs.cloudflare-project }}
+        run: echo "project=${PROJECT:-${GITHUB_REPOSITORY#*/}}" >> "$GITHUB_OUTPUT"
+      - name: Deploy to Cloudflare Pages (production)
+        if: inputs.target == 'cloudflare'
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy dist --project-name=${{ steps.cf.outputs.project }} --branch=main --commit-hash=${{ github.sha }}
+
+      - name: Deploy to SiteGround (rsync over SSH)
+        if: inputs.target == 'siteground'
+        env:
+          SSH_KEY: ${{ secrets.SG_SSH_KEY }}
+          SG_HOST: ${{ secrets.SG_HOST }}
+          SG_USER: ${{ secrets.SG_USER }}
+          SG_PORT: ${{ secrets.SG_PORT }}
+          SG_PATH: ${{ secrets.SG_PATH }}
+        run: |
+          set -euo pipefail
+          for v in SSH_KEY SG_HOST SG_USER SG_PATH; do [[ -n "${!v}" ]] || { echo "::error::Secret for $v is missing."; exit 1; }; done
+          install -m 600 /dev/null "$RUNNER_TEMP/key"
+          printf '%s\n' "$SSH_KEY" > "$RUNNER_TEMP/key"
+          trap 'rm -f "$RUNNER_TEMP/key"' EXIT
+          rsync -az --delete -e "ssh -i $RUNNER_TEMP/key -p ${SG_PORT:-18765} -o StrictHostKeyChecking=accept-new" dist/ "$SG_USER@$SG_HOST:$SG_PATH/"
+
+      - name: Keep this release for rollback
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ github.sha }}
+          path: dist
+          retention-days: 30
+
+  notify:
+    name: Slack on failure
+    needs: [gate, deploy]
+    if: failure()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - env:
+          WEBHOOK: ${{ secrets.SLACK_WEBHOOK_URL }}
+          REASON: ${{ needs.gate.outputs.reason }}
+          GATE: ${{ needs.gate.result }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          REPO: ${{ github.event.repository.name }}
+        run: |
+          if [[ -z "$WEBHOOK" ]]; then exit 0; fi
+          if [[ "$GATE" == "failure" ]]; then
+            what="Deploy blocked by the approval gate: $REASON The live site is unchanged."
+          else
+            what="Deploy failed. Check the live site: a SiteGround upload can stop halfway."
+          fi
+          jq -n --arg text "🔴 *[$REPO]* $what <$RUN_URL|Details>" '{text: $text}' \
+            | curl -sS --fail -X POST -H 'Content-Type: application/json' --data @- "$WEBHOOK"
