@@ -6,15 +6,17 @@
 #   scripts/new-client.sh create REPO [DIR]   new private repo from Site Kit + settings, labels, secrets; clone to DIR
 #   scripts/new-client.sh sync REPO|--all     copy the Keychain secrets to one repo, or to every Site Kit repo (after a rotation)
 #   scripts/new-client.sh status              which secrets are in the Keychain
+#   scripts/new-client.sh set REPO NAME       save the clipboard as a secret of one repo only (e.g. TURNSTILE_SECRET_KEY)
 #
-# NAME is one of: CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID CLAUDE_CODE_OAUTH_TOKEN SLACK_WEBHOOK_URL
-# SiteGround clients also need SG_SSH_KEY, SG_HOST, SG_USER, SG_PATH (per client, set by hand) and `target: siteground`.
+# NAME is one of: CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID CLAUDE_CODE_OAUTH_TOKEN SLACK_WEBHOOK_URL RESEND_API_KEY
+# (shared by all sites). Per-site secrets go through `set`: TURNSTILE_SECRET_KEY, ZOHO_* (CRM), SG_* (SiteGround).
+# SiteGround clients also need SG_SSH_KEY, SG_HOST, SG_USER, SG_PATH, plus hosting/target: siteground.
 set -euo pipefail
 
 ORG=digitalshift-srl
 TEMPLATE=$ORG/site-kit
 SERVICE=digitalshift-ci
-SECRETS=(CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID CLAUDE_CODE_OAUTH_TOKEN SLACK_WEBHOOK_URL)
+SECRETS=(CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID CLAUDE_CODE_OAUTH_TOKEN SLACK_WEBHOOK_URL RESEND_API_KEY)
 GIT_NAME=${GIT_NAME:-Andrea}
 
 die() { echo "error: $*" >&2; exit 1; }
@@ -29,6 +31,11 @@ check_value() { # NAME VALUE → exit 0 if plausible
     CLOUDFLARE_ACCOUNT_ID) [[ "$v" =~ ^[0-9a-f]{32}$ ]] ;;
     CLAUDE_CODE_OAUTH_TOKEN) [[ "$v" == sk-ant-* && ${#v} -gt 40 ]] ;;
     SLACK_WEBHOOK_URL) [[ "$v" == https://hooks.slack.com/services/* ]] ;;
+    RESEND_API_KEY) [[ "$v" == re_* && ${#v} -gt 20 ]] ;;
+    TURNSTILE_SECRET_KEY) [[ "$v" =~ ^0x[0-9A-Za-z_-]{20,}$ ]] ;;
+    ZOHO_CLIENT_ID) [[ "$v" =~ ^1000\.[A-Z0-9]{20,}$ ]] ;;
+    ZOHO_CLIENT_SECRET|ZOHO_REFRESH_TOKEN) [[ ${#v} -gt 20 ]] ;;
+    SG_SSH_KEY|SG_HOST|SG_USER|SG_PORT|SG_PATH) [[ -n "$v" ]] ;;
     *) return 1 ;;
   esac
 }
@@ -42,6 +49,17 @@ cmd_store() {
   # -U updates an existing item. The value is briefly visible to `ps` on this Mac only.
   security add-generic-password -U -s "$SERVICE" -a "$name" -l "DigitalShift CI: $name" -w "$v"
   info "$name saved in the Keychain."
+}
+
+cmd_set() { # REPO NAME: one repo's own secret, straight from the clipboard (not kept in the Keychain)
+  local repo=${1:-} name=${2:-} v
+  [[ -n "$repo" && -n "$name" ]] || die "set REPO NAME"
+  gh repo view "$ORG/$repo" >/dev/null 2>&1 || die "$ORG/$repo not found"
+  if [[ "$name" == SG_SSH_KEY ]]; then v=$(pbpaste); else v=$(pbpaste | tr -d '[:space:]'); fi
+  [[ -n "$v" ]] || die "clipboard is empty"
+  check_value "$name" "$v" || die "the clipboard doesn't look like a valid $name (nothing saved)"
+  printf '%s' "$v" | gh secret set "$name" -R "$ORG/$repo"
+  info "$repo: $name set"
 }
 
 cmd_status() {
@@ -114,6 +132,7 @@ case "${1:-}" in
   store) shift; cmd_store "$@" ;;
   create) shift; cmd_create "$@" ;;
   sync) shift; cmd_sync "$@" ;;
+  set) shift; cmd_set "$@" ;;
   status) cmd_status ;;
-  *) sed -n '2,11p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
+  *) sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
 esac

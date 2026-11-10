@@ -43,6 +43,16 @@ on:
         required: false
       CLOUDFLARE_ACCOUNT_ID:
         required: false
+      RESEND_API_KEY:
+        required: false
+      TURNSTILE_SECRET_KEY:
+        required: false
+      ZOHO_CLIENT_ID:
+        required: false
+      ZOHO_CLIENT_SECRET:
+        required: false
+      ZOHO_REFRESH_TOKEN:
+        required: false
       SG_SSH_KEY:
         required: false
       SG_HOST:
@@ -132,6 +142,11 @@ jobs:
           NAME: ${{ inputs.worker-name }}
           VERSION: ${{ inputs.wrangler-version }}
           SHA: ${{ github.sha }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          TURNSTILE_SECRET_KEY: ${{ secrets.TURNSTILE_SECRET_KEY }}
+          ZOHO_CLIENT_ID: ${{ secrets.ZOHO_CLIENT_ID }}
+          ZOHO_CLIENT_SECRET: ${{ secrets.ZOHO_CLIENT_SECRET }}
+          ZOHO_REFRESH_TOKEN: ${{ secrets.ZOHO_REFRESH_TOKEN }}
         run: |
           set -euo pipefail
           for v in CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID; do [[ -n "${!v}" ]] || { echo "::error::Secret $v is missing."; exit 1; }; done
@@ -139,7 +154,16 @@ jobs:
           if [[ ! -f wrangler.jsonc ]]; then
             printf '%s\n' '{ "name": "site", "compatibility_date": "2026-11-01", "assets": { "directory": "./dist", "not_found_handling": "404-page", "html_handling": "auto-trailing-slash" }, "workers_dev": true, "preview_urls": true }' > wrangler.jsonc
           fi
-          npx -y "wrangler@$VERSION" deploy --name "$name" --tag "${SHA:0:7}" --message "main ${SHA:0:7}"
+          # Contact form secrets (Resend, Turnstile, Zoho) for the Worker (worker/), uploaded with the version. Only when the repo has a Worker.
+          secrets_args=()
+          if grep -q '"main"' wrangler.jsonc; then
+            install -m 600 /dev/null "$RUNNER_TEMP/secrets.json"
+            jq -n 'env | {RESEND_API_KEY, TURNSTILE_SECRET_KEY, ZOHO_CLIENT_ID, ZOHO_CLIENT_SECRET, ZOHO_REFRESH_TOKEN}
+              | with_entries(select(.value != null and .value != ""))' > "$RUNNER_TEMP/secrets.json"
+            secrets_args=(--secrets-file "$RUNNER_TEMP/secrets.json")
+            trap 'rm -f "$RUNNER_TEMP/secrets.json"' EXIT
+          fi
+          npx -y "wrangler@$VERSION" deploy --name "$name" --tag "${SHA:0:7}" --message "main ${SHA:0:7}" "${secrets_args[@]}"
           # Rollback: npx wrangler rollback --name <worker> (or Cloudflare dashboard → Deployments).
 
       - name: Deploy to SiteGround (rsync over SSH)
@@ -150,13 +174,27 @@ jobs:
           SG_USER: ${{ secrets.SG_USER }}
           SG_PORT: ${{ secrets.SG_PORT }}
           SG_PATH: ${{ secrets.SG_PATH }}
+          TURNSTILE_SECRET_KEY: ${{ secrets.TURNSTILE_SECRET_KEY }}
+          ZOHO_CLIENT_ID: ${{ secrets.ZOHO_CLIENT_ID }}
+          ZOHO_CLIENT_SECRET: ${{ secrets.ZOHO_CLIENT_SECRET }}
+          ZOHO_REFRESH_TOKEN: ${{ secrets.ZOHO_REFRESH_TOKEN }}
         run: |
           set -euo pipefail
           for v in SSH_KEY SG_HOST SG_USER SG_PATH; do [[ -n "${!v}" ]] || { echo "::error::Secret for $v is missing."; exit 1; }; done
           install -m 600 /dev/null "$RUNNER_TEMP/key"
           printf '%s\n' "$SSH_KEY" > "$RUNNER_TEMP/key"
-          trap 'rm -f "$RUNNER_TEMP/key"' EXIT
-          rsync -az --delete -e "ssh -i $RUNNER_TEMP/key -p ${SG_PORT:-18765} -o StrictHostKeyChecking=accept-new" dist/ "$SG_USER@$SG_HOST:$SG_PATH/"
+          trap 'rm -f "$RUNNER_TEMP/key" "$RUNNER_TEMP/form-secrets.php"' EXIT
+          ssh_cmd="ssh -i $RUNNER_TEMP/key -p ${SG_PORT:-18765} -o StrictHostKeyChecking=accept-new"
+          # form-secrets.php lives only on the server: excluded so --delete keeps it, uploaded on its own.
+          rsync -az --delete --exclude /form-secrets.php -e "$ssh_cmd" dist/ "$SG_USER@$SG_HOST:$SG_PATH/"
+          if [[ -f dist/form.php && -n "$TURNSTILE_SECRET_KEY$ZOHO_REFRESH_TOKEN" ]]; then
+            install -m 600 /dev/null "$RUNNER_TEMP/form-secrets.php"
+            php -r 'echo "<?php return " . var_export(array_filter([
+              "turnstile" => getenv("TURNSTILE_SECRET_KEY"), "zoho_client_id" => getenv("ZOHO_CLIENT_ID"),
+              "zoho_client_secret" => getenv("ZOHO_CLIENT_SECRET"), "zoho_refresh_token" => getenv("ZOHO_REFRESH_TOKEN"),
+            ]), true) . ";\n";' > "$RUNNER_TEMP/form-secrets.php"
+            rsync -az --chmod=F600 -e "$ssh_cmd" "$RUNNER_TEMP/form-secrets.php" "$SG_USER@$SG_HOST:$SG_PATH/form-secrets.php"
+          fi
 
       - name: Keep this release for rollback
         uses: actions/upload-artifact@v7

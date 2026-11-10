@@ -16,7 +16,7 @@ A missing secret skips its step with a notice, so a repo works before Cloudflare
 
 ## New client in one command
 
-`scripts/new-client.sh` (macOS) keeps the four shared secrets in the login Keychain and copies them into each repo, because on GitHub Free org secrets don't reach private repos.
+`scripts/new-client.sh` (macOS) keeps the five shared secrets in the login Keychain and copies them into each repo, because on GitHub Free org secrets don't reach private repos.
 
 ```sh
 # once per Mac, and again after rotating a token: copy the value, then
@@ -24,6 +24,7 @@ scripts/new-client.sh store CLOUDFLARE_API_TOKEN      # checked live with Cloudf
 scripts/new-client.sh store CLOUDFLARE_ACCOUNT_ID
 scripts/new-client.sh store CLAUDE_CODE_OAUTH_TOKEN
 scripts/new-client.sh store SLACK_WEBHOOK_URL
+scripts/new-client.sh store RESEND_API_KEY            # contact forms on Cloudflare
 scripts/new-client.sh status
 
 # each new client: private repo from Site Kit, squash-only, labels, secrets, cloned to ~/Developer/<name>
@@ -31,6 +32,10 @@ scripts/new-client.sh create casabella
 
 # after rotating a token: push the new value to every client repo
 scripts/new-client.sh sync --all
+
+# one site's own secrets (copy the value first)
+scripts/new-client.sh set casabella TURNSTILE_SECRET_KEY
+scripts/new-client.sh set casabella SG_SSH_KEY         # SiteGround sites: also SG_HOST, SG_USER, SG_PATH
 ```
 
 ## Decisions (2026-11-10)
@@ -68,6 +73,15 @@ Every step below creates or changes something outside this laptop. Claude does e
 
 **8. Slack.** Create the channel `#site-reviews` and an incoming webhook, and save it as the secret `SLACK_WEBHOOK_URL`. Optional: the GitHub Slack app for review notifications.
 
+**8b. Contact forms.** Site Kit's form works on both hosts (`hosting` in `src/site.config.ts`, matching `target:` in `deploy.yml`).
+- Cloudflare: a Worker (`worker/`) sends through [Resend](https://resend.com) (free: 3,000 emails/month, 100/day, 3 domains). Verify one DigitalShift sending subdomain in Resend (DNS records on `send.digitalshift.info`) and send every client's form from it, with the visitor as Reply-To. Save the API key once: `new-client.sh store RESEND_API_KEY`. CI uploads it to each Worker with every preview and deploy.
+- SiteGround: `form.php` uses SiteGround's own mail, from a mailbox on the client's domain.
+- Both: one Cloudflare Turnstile widget per site (free, 20 widgets per account, 10 hostnames each). Add the client's domain and `info-digitalshift.workers.dev` (previews), put the site key in `form.turnstileSiteKey`, and the secret with `new-client.sh set <repo> TURNSTILE_SECRET_KEY`. CI uploads it to the Worker, or writes `form-secrets.php` next to `form.php` on SiteGround (never in git or in the release artifact).
+
+**8c. CRM (optional, per site).** Each form message can also be saved in the client's CRM; the e-mail still goes out as the backup and is flagged ⚠ when the CRM save failed. Built in: Zoho CRM, direct, with no middle service. Other CRMs get their own connector when a client needs one.
+- Zoho: in the client's Zoho account open the API console for its data center (api-console.zoho.eu for crm.zoho.eu) → Add Client → Self Client. Under Generate Code, enter the scope `ZohoCRM.modules.leads.CREATE,ZohoCRM.modules.leads.UPDATE`, 10 minutes, and exchange the code for a refresh token (`POST https://accounts.zoho.eu/oauth/v2/token?grant_type=authorization_code&client_id=…&client_secret=…&code=…`).
+- Save the three values with `new-client.sh set <repo> ZOHO_CLIENT_ID`, `ZOHO_CLIENT_SECRET` and `ZOHO_REFRESH_TOKEN`, then set `form.crm.type: 'zoho'` and the field map in `src/site.config.ts`.
+
 **9. Managed settings.** In the claude.ai admin console, set `permissions.disableBypassPermissionsMode: "disable"`.
 
 **10. Test on the pilot.**
@@ -76,7 +90,7 @@ Every step below creates or changes something outside this laptop. Claude does e
 - Approve, push one more commit, then merge: the gate must block (stale approval). Re-approve and re-run: it deploys.
 - Tune the Lighthouse thresholds (`lighthouserc.json`) and the review prompt.
 
-**11. Carsboutique (SiteGround).** In its repo, set `target: siteground`. Make a key with `ssh-keygen -m PEM -t rsa -b 4096 -N ""` and import the public half in Site Tools → Devs → SSH Keys Manager. Add the secrets `SG_SSH_KEY`, `SG_HOST`, `SG_USER` and `SG_PATH` (`SG_PORT` defaults to 18765). An rsync deploy isn't atomic: each deploy keeps `dist` as an artifact named `release-<sha>` for 30 days.
+**11. Carsboutique (SiteGround).** In its repo, set `target: siteground` and `hosting: 'siteground'`. Make a key with `ssh-keygen -m PEM -t rsa -b 4096 -N ""` and import the public half in Site Tools → Devs → SSH Keys Manager. Add the secrets `SG_SSH_KEY`, `SG_HOST`, `SG_USER` and `SG_PATH` (`new-client.sh set`) (`SG_PORT` defaults to 18765). An rsync deploy isn't atomic: each deploy keeps `dist` as an artifact named `release-<sha>` for 30 days.
 
 ## Known limits
 
