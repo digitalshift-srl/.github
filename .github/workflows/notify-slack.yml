@@ -40,7 +40,13 @@ jobs:
           case "$CI" in success) ci="✅" ;; failure) ci="❌" ;; *) ci="⚪ ${CI:-n/a}" ;; esac
           case "$VERDICT" in PASS) rv="✅ pass" ;; BLOCK) rv="⚠️ issues found" ;; SKIPPED|'') rv="– skipped" ;; *) rv="❔ no verdict" ;; esac
           dot="🟢"; [[ "$CI" == "success" && "$VERDICT" != "BLOCK" ]] || dot="🟠"
-          preview="–"; [[ -n "$PREVIEW" ]] && preview="<$PREVIEW|open preview>"
+          preview="–"
+          if [[ -n "$PREVIEW" ]]; then
+            # Cloudflare Access redirects to cloudflareaccess.com (or answers 401/403) when the preview is private.
+            read -r code location < <(curl -s -o /dev/null -w '%{http_code} %{redirect_url}\n' "$PREVIEW" || echo "000 -")
+            lock="🔓 public"; [[ "$code" =~ ^(401|403)$ || "$location" == *cloudflareaccess.com* ]] && lock="🔒"
+            preview="<$PREVIEW|open preview> $lock"
+          fi
           text="$dot *[$(esc "$REPO")]* <$PR_URL|$(esc "$TITLE")> by $(esc "$AUTHOR")
           Preview: $preview · Checks: $ci (<$RUN_URL|details>) · Claude review: $rv
           <$PR_URL/files|Review PR →>"

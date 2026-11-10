@@ -113,6 +113,7 @@ cmd_create() {
 Done. Next:
   cd "$dir" && npm install && claude      then /site-brief
   First PR creates the Worker "$repo" and posts a preview link.
+  Then make its previews private: Cloudflare Access on the Worker's Preview URLs (README step 6b).
   SiteGround client? Set target: siteground in .github/workflows/deploy.yml and add SG_* secrets.
 EOF
 }
