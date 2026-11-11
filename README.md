@@ -73,7 +73,7 @@ Every step below creates or changes something outside this laptop. Claude does e
 
 **7. Claude review.** Install the Claude GitHub App on the org (`/install-github-app` in Claude Code, or github.com/apps/claude). Run `claude setup-token` and save the token as the secret `CLAUDE_CODE_OAUTH_TOKEN`. An `ANTHROPIC_API_KEY` works instead.
 
-**7b. @claude on GitHub.** Write `@claude` and a request in a PR comment, a review or a new issue ("@claude make the hero headline smaller"). Claude pushes the change to that PR (or opens a PR from an issue); the preview, checks, review and Slack message run again, and any approval goes stale. Only people with write access can trigger it, and the repo's guardrails apply (no merge, approve, push to main or deploy). Each repo needs `.github/workflows/claude.yml` on `main` (Site Kit has it); it uses `CLAUDE_CODE_OAUTH_TOKEN`, so each request counts against that Claude plan. Needs the Claude GitHub App on the org (step 7).
+**7b. @claude on GitHub.** Write `@claude` and a request in a PR comment, a review or a new issue ("@claude make the hero headline smaller"). Claude pushes the change to that PR. From an issue it pushes a new `claude/issue-…` branch and posts a "Create PR" link in its reply; tap it to open the PR. Either way, the preview, checks, review and Slack message run again, and any approval goes stale. Only people with write access can trigger it, and their membership of the org must be **public** (org → People → Organization visibility): GitHub reports private members as outsiders, and the request is silently skipped. The repo's guardrails apply (no merge, approve, push to main or deploy). Each repo needs `.github/workflows/claude.yml` on `main` (Site Kit has it); it uses `CLAUDE_CODE_OAUTH_TOKEN`, so each request counts against that Claude plan. Needs the Claude GitHub App on the org (step 7).
 
 **8. Slack.** Create the channel `#site-reviews` and an incoming webhook, and save it as the secret `SLACK_WEBHOOK_URL`. Optional: the GitHub Slack app for review notifications.
 
@@ -86,15 +86,13 @@ Every step below creates or changes something outside this laptop. Claude does e
 - Zoho: in the client's Zoho account open the API console for its data center (api-console.zoho.eu for crm.zoho.eu) → Add Client → Self Client. Then run `scripts/new-client.sh zoho <repo>` and follow it: it asks you to copy the Client ID, the Client Secret and a fresh code, swaps the code for a refresh token, checks that Zoho accepts it, and saves the three secrets. For another data center pass its accounts URL, e.g. `zoho <repo> https://accounts.zoho.com`.
 - Then set `form.crm.type: 'zoho'` and the field map in `src/site.config.ts`.
 
-**9. Managed settings.** In the claude.ai admin console, set `permissions.disableBypassPermissionsMode: "disable"`.
-
-**10. Test on the pilot.**
+**9. Test on the pilot.**
 - Open 2–3 real PRs and check the preview, the review comments and the Slack message.
 - Merge one **without** approval: the gate must block the deploy and post to Slack.
 - Approve, push one more commit, then merge: the gate must block (stale approval). Re-approve and re-run: it deploys.
 - Tune the Lighthouse thresholds (`lighthouserc.json`) and the review prompt.
 
-**11. Carsboutique (SiteGround).** In its repo, set `target: siteground` and `hosting: 'siteground'`. Make a key with `ssh-keygen -m PEM -t rsa -b 4096 -N ""` and import the public half in Site Tools → Devs → SSH Keys Manager. Add the secrets `SG_SSH_KEY`, `SG_HOST`, `SG_USER` and `SG_PATH` (`new-client.sh set`) (`SG_PORT` defaults to 18765). An rsync deploy isn't atomic: each deploy keeps `dist` as an artifact named `release-<sha>` for 30 days.
+**10. A site on SiteGround.** In its repo, set `target: siteground` and `hosting: 'siteground'`. Make a key with `ssh-keygen -m PEM -t rsa -b 4096 -N ""` and import the public half in Site Tools → Devs → SSH Keys Manager. Add the secrets `SG_SSH_KEY`, `SG_HOST`, `SG_USER` and `SG_PATH` (`new-client.sh set`) (`SG_PORT` defaults to 18765). An rsync deploy isn't atomic: each deploy keeps `dist` as an artifact named `release-<sha>` for 30 days.
 
 ## Known limits
 
