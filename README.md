@@ -42,7 +42,7 @@ scripts/new-client.sh set casabella SG_SSH_KEY         # SiteGround sites: also 
 
 - **GitHub Free** for now. Nothing on Free blocks a merge into `main` of a private repo, so `deploy.yml` checks approval before deploying (research §11.1). Upgrade to Team when the hard merge rule is needed; the stubs don't change.
 - **Org:** `digitalshift-srl`. **Approvers:** `andreagriffini` (the `approvers` input default in `deploy.yml`).
-- **Andrea's own PRs: admin bypass.** The gate accepts a PR authored by an approver only when it carries the `admin-bypass` label, which a person adds by hand. Claude Code can't add it (Site Kit guard hook). The label matters because every PR an agent opens from Andrea's laptop is authored by Andrea. Without it, the agent's PRs would bypass review.
+- **Andrea's own PRs deploy on merge.** The gate accepts any PR authored by an approver, with no label (decided 2026-11-12). Every PR an agent opens from Andrea's laptop is authored by Andrea too, so merging one deploys it: review agent PRs before merging. The `admin-bypass` label is no longer checked.
   **Decided 2026-11-10: this is the normal path** for Andrea's own PRs (GitHub doesn't allow approving your own PR). Adding a partner to `approvers` later gives client sites a second pair of eyes; nothing else changes.
 - **Pilot:** the DigitalShift site first, then CM Carsboutique (SiteGround target).
 

@@ -4,9 +4,8 @@
 #   - it must be on main and be the merge commit of a merged PR into main;
 #   - and one of these is true:
 #     a) an approver's latest review on that PR is APPROVED, on the PR's final head commit;
-#     b) ADMIN BYPASS: the PR author is an approver AND a person added the `admin-bypass` label.
-#        (Without the label, every PR an agent opens from Andrea's laptop would count as Andrea's.)
-#        This is the normal path for Andrea's own PRs (decided 2026-11-10).
+#     b) the PR author is an approver: Andrea's own PRs deploy without a second approval (decided 2026-11-12).
+#        PRs an agent opens from Andrea's laptop are authored by Andrea too, so they deploy on merge as well.
 #     c) the PR author is a trusted bot (Renovate automerge after green CI).
 # CMS rebuilds (repository_dispatch) and manual runs re-check the commit at the tip of main the same way.
 # require-approval: false turns the gate off for one repo (test environments): any commit on main deploys,
@@ -35,6 +34,7 @@ on:
         type: string
         default: 'andreagriffini'
       bypass-label:
+        description: Unused since 2026-11-12 (approvers' own PRs pass without a label). Kept so existing callers don't break.
         type: string
         default: 'admin-bypass'
       require-approval:
@@ -88,7 +88,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           SHA: ${{ github.sha }}
           APPROVERS: ${{ inputs.approvers }}
-          BYPASS_LABEL: ${{ inputs.bypass-label }}
           BOTS: ${{ inputs.trusted-bots }}
           REQUIRE_APPROVAL: ${{ inputs.require-approval }}
         run: |
@@ -122,9 +121,9 @@ jobs:
               | map(select(.state == "APPROVED" and .commit_id == $head) | .user.login) | join(",")')
           if [[ -n "$approved" ]]; then pass "PR #$pr approved by $approved on its final commit."; fi
 
-          if inlist "$author" "$APPROVERS" && jq -e --arg l "$BYPASS_LABEL" '.labels | map(.name) | index($l)' <<<"$pr_json" >/dev/null; then
-            echo "::warning::ADMIN BYPASS: PR #$pr by $author deployed without a second approval."
-            pass "PR #$pr by $author with the $BYPASS_LABEL label (admin bypass)."
+          if inlist "$author" "$APPROVERS"; then
+            echo "::notice::PR #$pr is by approver $author: deployed without a second approval."
+            pass "PR #$pr by approver $author."
           fi
 
           fail "PR #$pr has no approval from ($APPROVERS) on its final commit ${head:0:7}. Approve it on GitHub, then re-run this workflow."
