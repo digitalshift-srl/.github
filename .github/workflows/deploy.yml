@@ -9,6 +9,8 @@
 #        This is the normal path for Andrea's own PRs (decided 2026-11-10).
 #     c) the PR author is a trusted bot (Renovate automerge after green CI).
 # CMS rebuilds (repository_dispatch) and manual runs re-check the commit at the tip of main the same way.
+# require-approval: false turns the gate off for one repo (test environments): any commit on main deploys,
+# including direct pushes, with a warning in the run. Set it back to true (or remove it) before the site goes live.
 # Not a security boundary: anyone with write access can change the stub. On GitHub Team, add the ruleset.
 name: deploy
 on:
@@ -35,6 +37,10 @@ on:
       bypass-label:
         type: string
         default: 'admin-bypass'
+      require-approval:
+        description: false = no approval gate (test environments only); every commit on main deploys
+        type: boolean
+        default: true
       trusted-bots:
         type: string
         default: 'renovate[bot]'
@@ -84,6 +90,7 @@ jobs:
           APPROVERS: ${{ inputs.approvers }}
           BYPASS_LABEL: ${{ inputs.bypass-label }}
           BOTS: ${{ inputs.trusted-bots }}
+          REQUIRE_APPROVAL: ${{ inputs.require-approval }}
         run: |
           set -euo pipefail
           fail() { echo "::error::$1"; echo "reason=$1" >> "$GITHUB_OUTPUT"; exit 1; }
@@ -91,6 +98,10 @@ jobs:
           inlist() { local x; IFS=',' read -ra x <<<"$2"; for a in "${x[@]}"; do [[ "$(echo "$a" | xargs)" == "$1" ]] && return 0; done; return 1; }
 
           [[ "$GITHUB_REF" == "refs/heads/main" ]] || fail "Production deploys only from main (got $GITHUB_REF)."
+          if [[ "$REQUIRE_APPROVAL" == "false" ]]; then
+            echo "::warning::Approval gate OFF for this repo (require-approval: false). Turn it back on before launch."
+            pass "Gate off (require-approval: false): ${SHA:0:7} on main deploys without approval."
+          fi
           [[ -n "$APPROVERS" && "$APPROVERS" != *ANDREA_GITHUB_LOGIN* ]] || fail "Approvers not configured in digitalshift-srl/.github deploy.yml."
 
           pr_json=$(gh api "repos/$GITHUB_REPOSITORY/commits/$SHA/pulls" \
