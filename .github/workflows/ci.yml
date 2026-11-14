@@ -82,6 +82,11 @@ jobs:
         # In the Site Kit template repo itself, TODO placeholders are by design: warnings, not failures.
         run: node scripts/qa.mjs ${{ github.event.repository.is_template && '--template' || '' }}
 
+      - name: Accessibility (axe in Chrome)
+        # Site Kit's scripts/a11y.mjs; repos made before it skip this step.
+        if: ${{ !cancelled() && steps.built.outputs.built == 'true' && hashFiles('scripts/a11y.mjs') != '' }}
+        run: npm run a11y
+
       - name: External links (report only)
         if: ${{ !cancelled() && steps.built.outputs.built == 'true' }}
         uses: lycheeverse/lychee-action@v2
