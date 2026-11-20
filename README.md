@@ -38,6 +38,16 @@ scripts/new-client.sh set casabella TURNSTILE_SECRET_KEY
 scripts/new-client.sh set casabella SG_SSH_KEY         # SiteGround sites: also SG_HOST, SG_USER, SG_PATH
 ```
 
+## A partner's Mac in one line
+
+`scripts/setup-mac.sh` is public on purpose (this repo is public) and holds no secrets. It installs Homebrew and the GitHub CLI, logs in to GitHub, then downloads the private `claude-setup` repo and runs its `bootstrap.sh`:
+
+```sh
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/digitalshift-srl/.github/main/scripts/setup-mac.sh)"
+```
+
+The person must already be a member of the org, or it stops and says so.
+
 ## Keep older client repos up to date
 
 Each client repo is a copy of Site Kit from the day it was created, so later kit improvements (skills, start scripts) don't reach it by themselves. `scripts/kit-sync.sh` copies the kit-owned parts into existing repos: `/site-new` and the step skills, `scripts/start/`, the `live-shots` command and permissions, and the `CLAUDE.md` step line. Site files (pages, styles, content, `site/*.md`, workflows) are never touched. Repos older than the kit's a11y/setup tools keep their own step skills and only get `/site-new`.
