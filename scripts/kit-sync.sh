@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
-# Copy the kit-owned parts of Site Kit into existing client repos, so older sites get the latest skills and tools.
+# Copy the kit-owned parts of Site Kit into existing client repos, so older sites get the latest skills and tools
+# (/site-new and the step skills, scripts/start/ with the old-URL and Google listing tools, npm run live-check).
+# Not copied, because each site's version has diverged: scripts/qa.mjs, Base.astro and the business block in
+# site.config.ts. Port those by hand at launch (Site Kit GUIDE §6).
 # Site files (pages, styles, content, site/*.md, workflows) are never touched.
 #
 #   scripts/kit-sync.sh REPO [REPO…]   e.g. lexlab studio-legale-pellegrini   (folders in ~/Developer)
@@ -46,6 +49,8 @@ for r in "${repos[@]}"; do
     cp -R "$KIT/.claude/skills/$s" "$dst/.claude/skills/$s"
   done
   rm -rf "$dst/scripts/start"; mkdir -p "$dst/scripts"; cp -R "$KIT/scripts/start" "$dst/scripts/start"
+  # The live check only reads site.url and public/_redirects, so it works on any site.
+  [[ -f "$KIT/scripts/live-check.mjs" ]] && cp "$KIT/scripts/live-check.mjs" "$dst/scripts/live-check.mjs"
   find "$dst/scripts/start" -name __pycache__ -prune -exec rm -rf {} +
 
   # 2. package.json scripts + playwright-core, settings allow-list: add what's missing, keep the site's own values.
@@ -55,6 +60,7 @@ const read = (p) => JSON.parse(fs.readFileSync(p, 'utf8'));
 const pkg = read(`${dst}/package.json`), kpkg = read(`${kit}/package.json`);
 pkg.scripts ??= {};
 pkg.scripts['live-shots'] ??= kpkg.scripts['live-shots'];
+if (kpkg.scripts['live-check']) pkg.scripts['live-check'] ??= kpkg.scripts['live-check'];
 pkg.devDependencies ??= {};
 pkg.devDependencies['playwright-core'] ??= kpkg.devDependencies['playwright-core'];
 fs.writeFileSync(`${dst}/package.json`, JSON.stringify(pkg, null, 2) + '\n');
@@ -83,4 +89,4 @@ EOF
   git -C "$dst" status -s | sed 's/^/  /'
 done
 echo
-echo "Review each worktree in $WT, then commit (chore(kit): sync /site-new and start scripts from Site Kit) and open a PR."
+echo "Review each worktree in $WT, then commit (chore(kit): sync skills, start scripts and live check from Site Kit) and open a PR."
