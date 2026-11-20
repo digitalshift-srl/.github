@@ -38,6 +38,17 @@ scripts/new-client.sh set casabella TURNSTILE_SECRET_KEY
 scripts/new-client.sh set casabella SG_SSH_KEY         # SiteGround sites: also SG_HOST, SG_USER, SG_PATH
 ```
 
+## Keep older client repos up to date
+
+Each client repo is a copy of Site Kit from the day it was created, so later kit improvements (skills, start scripts) don't reach it by themselves. `scripts/kit-sync.sh` copies the kit-owned parts into existing repos: `/site-new` and the step skills, `scripts/start/`, the `live-shots` command and permissions, and the `CLAUDE.md` step line. Site files (pages, styles, content, `site/*.md`, workflows) are never touched. Repos older than the kit's a11y/setup tools keep their own step skills and only get `/site-new`.
+
+```sh
+git -C ~/Developer/site-kit pull                     # the source is site-kit as it is on disk
+scripts/kit-sync.sh --all                            # or: scripts/kit-sync.sh lexlab studio-legale-pellegrini
+```
+
+Each repo gets a worktree in `~/Developer/wt/<repo>-kit-sync` on branch `chore/kit-sync` (your own checkout is left alone). Review, commit `chore(kit): sync …` and open a PR from there.
+
 ## Decisions (2026-11-10)
 
 - **GitHub Free** for now. Nothing on Free blocks a merge into `main` of a private repo, so `deploy.yml` checks approval before deploying (research §11.1). Upgrade to Team when the hard merge rule is needed; the stubs don't change.
