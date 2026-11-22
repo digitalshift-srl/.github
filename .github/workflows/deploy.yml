@@ -32,7 +32,7 @@ on:
       approvers:
         description: Comma-separated GitHub logins whose approval allows a deploy
         type: string
-        default: 'andreagriffini'
+        default: 'andreagriffini,Mr-Charles-SG,jacopofontana'
       bypass-label:
         description: Unused since 2026-11-12 (approvers' own PRs pass without a label). Kept so existing callers don't break.
         type: string
